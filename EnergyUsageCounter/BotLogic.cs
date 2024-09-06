@@ -72,7 +72,7 @@ namespace GoDota2_Bot
                 BotConfiguration.Configuration.chatIds.Add(chatId);
                 BotConfiguration.Configuration.chatIds.Add(1890593232);
                 BotConfiguration.JsonToFile(BotConfiguration.Configuration, BotConfiguration.ConfigFilePath);
-                await client.SendTextMessageAsync(chatId, $"Welcome to my bot!!!\nYour chatId: {chatId}\n", replyMarkup: ReplyMarkups.GetDefaultButtons());
+                await client.SendTextMessageAsync(chatId, $"Welcome to EnergyCounter Telegram Bot", replyMarkup: ReplyMarkups.GetDefaultButtons());
             }
         }
 

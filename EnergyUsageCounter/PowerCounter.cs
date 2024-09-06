@@ -1,35 +1,40 @@
-﻿using LibreHardwareMonitor.Hardware;
+﻿using EnergyUsageCounter;
+using LibreHardwareMonitor.Hardware;
+using Newtonsoft.Json;
 using System.Diagnostics;
-using System.Threading;
+using System.Text.Json;
 
 public class PowerUsageMonitor : IDisposable
 {
-    private Stopwatch _stopwatch;
-    private readonly Computer _computer;
-    private static DateTime _startTime;
-    private static double _totalEnergyUsed; // To track the total energy used
-    private Dictionary<ISensor, SensorData> _sensorData;
+    private Stopwatch stopwatch;
+    private readonly Computer computer;
+    private static DateTime lastUpdateTime;
+    private static double totalEnergyUsed;
+    private string currentDay;
+    private Dictionary<ISensor, SensorData> sensorData;
+    public Dictionary<string, double> energyUsageHistory; 
+    public const string EnergyUsageFilePath = "energy_usage_data.json";
     private class SensorData
     {
         public double Sum { get; set; } = 0.0;
         public int Count { get; set; } = 0;
     }
-    private static PowerUsageMonitor _instance;
+    private static PowerUsageMonitor instance;
     public static PowerUsageMonitor Instance
     {
         get
         {
-            if (_instance == null)
+            if (instance == null)
             {
-                _instance = new PowerUsageMonitor();
+                instance = new PowerUsageMonitor();
             }
-            return _instance;
+            return instance;
         }
     }
 
     public PowerUsageMonitor()
     {
-        _computer = new Computer
+        computer = new Computer
         {
             IsCpuEnabled = true,
             IsGpuEnabled = true,
@@ -41,23 +46,26 @@ public class PowerUsageMonitor : IDisposable
             IsPsuEnabled = true
 
         };
-        _computer.Open();
-        _stopwatch = new Stopwatch();
-        _totalEnergyUsed = 0.0;
-        _sensorData = new Dictionary<ISensor, SensorData>();
+        computer.Open();
+        stopwatch = new Stopwatch();
+        totalEnergyUsed = 0.0;
+        sensorData = new Dictionary<ISensor, SensorData>();
+        energyUsageHistory = new Dictionary<string, double>();
+
+        LoadEnergyUsageHistory();
 
         if (!HasPowerSensors())
         {
             Console.WriteLine("No power sensors available. Exiting...");
-            return; // Завершуємо роботу програми, якщо немає датчиків
+            return; 
         }
     }
 
     public void StartMonitoring()
     {
-        _startTime = DateTime.Now;
-        _stopwatch.Restart();
-        _totalEnergyUsed = 0.0;
+        lastUpdateTime = DateTime.Now;
+        stopwatch.Restart();
+        totalEnergyUsed = 0.0;
     }
 
     public string GetCurrentPowerUsage()
@@ -67,7 +75,7 @@ public class PowerUsageMonitor : IDisposable
     }
     private bool HasPowerSensors()
     {
-        foreach (var hardware in _computer.Hardware)
+        foreach (var hardware in computer.Hardware)
         {
             hardware.Update();
             foreach (var sensor in hardware.Sensors)
@@ -82,25 +90,52 @@ public class PowerUsageMonitor : IDisposable
     }
     public void UpdatePowerUsage()
     {
-        // Update the total energy used since the last call
-        var currentPower = GetTotalPowerUsage(); // Get the current power usage in watts
-        var elapsedTimeInSeconds = (DateTime.Now - _startTime).TotalSeconds;
+        var currentPower = GetTotalPowerUsage();
+        var elapsedTimeInSeconds = (DateTime.Now - lastUpdateTime).TotalSeconds;
 
-        // Calculate energy used in watt-seconds and convert to watt-hours
-        _totalEnergyUsed += currentPower * elapsedTimeInSeconds / 3600.0; // Update total energy used
+        double energyUsed = currentPower * elapsedTimeInSeconds / 3600.0;
+        totalEnergyUsed += energyUsed;
 
-        // Reset start time for next interval
-        _startTime = DateTime.Now;
+        string currentDay = DateTime.Now.ToString("yyyy-MM-dd");
+        if (energyUsageHistory.ContainsKey(currentDay))
+        {
+            energyUsageHistory[currentDay] += energyUsed;
+        }
+        else
+        {
+            energyUsageHistory[currentDay] = energyUsed;
+        }
+
+        SaveEnergyUsageHistory(); 
+
+        lastUpdateTime = DateTime.Now;
+    }
+
+    private void LoadEnergyUsageHistory()
+    {
+        if (File.Exists(EnergyUsageFilePath))
+        {
+            var jsonString = File.ReadAllText(EnergyUsageFilePath);
+            energyUsageHistory = JsonConvert.DeserializeObject<Dictionary<string, double>>(jsonString);
+        }
+    }
+    private void SaveEnergyUsageHistory()
+    {
+        JsonSerializerSettings options = new JsonSerializerSettings();
+        options.Formatting = Formatting.Indented;
+        var jsonString = JsonConvert.SerializeObject(energyUsageHistory, options);
+        File.WriteAllText(EnergyUsageFilePath, jsonString);
     }
     public string GetTotalEnergyUsed()
     {
-        return $"Total energy used: {_totalEnergyUsed:F4} watt-hours";
+        double totalEnergyUsedToday = energyUsageHistory[DateTime.Now.ToString("yyyy-MM-dd")];
+        return $"Energy used from start: {totalEnergyUsed:F2} Wh\nEnergy used today: {totalEnergyUsedToday:F2} Wh";
     }
     private double GetTotalPowerUsage()
     {
         double totalPower = 0.0;
 
-        foreach (var hardware in _computer.Hardware)
+        foreach (var hardware in computer.Hardware)
         {
             hardware.Update();
             foreach (var sensor in hardware.Sensors)
@@ -109,16 +144,16 @@ public class PowerUsageMonitor : IDisposable
                 {
                     if (sensor.Value.HasValue)
                     {
-                        if (!_sensorData.ContainsKey(sensor))
+                        if (!sensorData.ContainsKey(sensor))
                         {
-                            _sensorData[sensor] = new SensorData();
+                            sensorData[sensor] = new SensorData();
                         }
-                        _sensorData[sensor].Sum += sensor.Value.Value;
-                        _sensorData[sensor].Count++;
+                        sensorData[sensor].Sum += sensor.Value.Value;
+                        sensorData[sensor].Count++;
 
                         totalPower += sensor.Value.Value;
                     }
-                    if (_sensorData.TryGetValue(sensor, out SensorData data) && data.Count > 0 && sensor.Value.Value == 0)
+                    if (sensorData.TryGetValue(sensor, out SensorData data) && data.Count > 0 && sensor.Value.Value == 0)
                     {
                         totalPower += data.Sum / data.Count;
                     }
@@ -132,7 +167,7 @@ public class PowerUsageMonitor : IDisposable
     {
         var sensorInfo = new List<string>();
 
-        foreach (var hardware in _computer.Hardware)
+        foreach (var hardware in computer.Hardware)
         {
             hardware.Update();
             foreach (var sensor in hardware.Sensors)
@@ -150,7 +185,7 @@ public class PowerUsageMonitor : IDisposable
 
     public void Dispose()
     {
-        _computer.Close();
+        computer.Close();
     }
 
     public static void RunPowerUsageMonitor()
