@@ -2,6 +2,8 @@
 using LibreHardwareMonitor.Hardware;
 using Newtonsoft.Json;
 using System.Diagnostics;
+using System.Management;
+using System.Net.NetworkInformation;
 using System.Text.Json;
 
 public class PowerUsageMonitor : IDisposable
@@ -13,7 +15,7 @@ public class PowerUsageMonitor : IDisposable
     private string currentDay;
     private Dictionary<ISensor, SensorData> sensorData;
     public Dictionary<string, double> energyUsageHistory; 
-    public const string EnergyUsageFilePath = "energy_usage_data.json";
+    public  string EnergyUsageFilePath = "energy_usage_data.json";
     private class SensorData
     {
         public double Sum { get; set; } = 0.0;
@@ -52,6 +54,8 @@ public class PowerUsageMonitor : IDisposable
         sensorData = new Dictionary<ISensor, SensorData>();
         energyUsageHistory = new Dictionary<string, double>();
 
+        EnergyUsageFilePath = $"energy_usage_data_{GetDiskSerialNumber()}{GetMacAddress()}.json";
+        Console.WriteLine($"{GetDiskSerialNumber()}<<<<<<<<<<<{GetMacAddress()}");
         LoadEnergyUsageHistory();
 
         if (!HasPowerSensors())
@@ -229,5 +233,22 @@ public class PowerUsageMonitor : IDisposable
         Console.WriteLine(message);
        
         return $"{message}\n{Instance.GetCurrentPowerUsage()}\n{Instance.GetTotalEnergyUsed()}";
-    }    
+    }
+    public string GetDiskSerialNumber()
+    {
+        ManagementObjectSearcher searcher = new ManagementObjectSearcher("SELECT * FROM Win32_DiskDrive");
+        foreach (ManagementObject disk in searcher.Get())
+        {
+            return disk["SerialNumber"].ToString();
+        }
+        return null;
+    }
+    public string GetMacAddress()
+    {
+        return NetworkInterface
+            .GetAllNetworkInterfaces()
+            .Where(nic => nic.OperationalStatus == OperationalStatus.Up && nic.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+            .Select(nic => nic.GetPhysicalAddress().ToString())
+            .FirstOrDefault();
+    }
 }
